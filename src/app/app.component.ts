@@ -1,17 +1,21 @@
-import { Component } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { CommonModule } from "@angular/common";
+import { Component } from "@angular/core";
+import { RouterOutlet } from "@angular/router";
+import { BookingsComponent } from "./bookings/bookings.component";
+import { FooterComponent } from "./core/footer.component";
+import { HeaderComponent } from "./core/header.component";
 
 @Component({
-  selector: 'lab-root',
+  selector: "lab-root",
   standalone: true,
-  imports: [RouterOutlet],
+  imports: [CommonModule, RouterOutlet, HeaderComponent, FooterComponent, BookingsComponent],
   template: `
-    <h1>Welcome to {{title}}!</h1>
+    <lab-header />
+    <lab-bookings />
 
     <router-outlet />
+    <lab-footer />
   `,
   styles: [],
 })
-export class AppComponent {
-  title = 'ActivityBookings';
-}
+export class AppComponent {}
