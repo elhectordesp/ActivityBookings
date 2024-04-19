@@ -1,8 +1,11 @@
 import { CurrencyPipe, DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { ChangeDetectionStrategy, Component, Signal, inject } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Meta, Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
-import { ACTIVITIES } from '../domain/activities.data';
+import { catchError, of } from 'rxjs';
+import { Activity } from '../domain/activity.type';
 
 @Component({
   standalone: true,
@@ -13,7 +16,7 @@ import { ACTIVITIES } from '../domain/activities.data';
         <h2>Activities</h2>
       </header>
       <main>
-        @for (activity of activities; track activity.id) {
+        @for (activity of activities(); track activity.id) {
           <div>
             <span>
               <a [routerLink]="['bookings', activity.slug]">{{ activity.name }}</a>
@@ -30,9 +33,16 @@ import { ACTIVITIES } from '../domain/activities.data';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export default class HomePage {
+  #httpClient$: HttpClient = inject(HttpClient);
+  #apiUrl: string = 'http://localhost:3000/activities';
   #title = inject(Title);
   #meta = inject(Meta);
-  activities = ACTIVITIES;
+  activities: Signal<Activity[]> = toSignal(
+    this.#httpClient$.get<Activity[]>(this.#apiUrl).pipe(catchError(() => of([]))),
+    {
+      initialValue: [],
+    },
+  );
 
   constructor() {
     this.#title.setTitle('Activities to book');

@@ -1,17 +1,21 @@
 import { CurrencyPipe, DatePipe, UpperCasePipe } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import {
   ChangeDetectionStrategy,
   Component,
+  InputSignal,
+  Signal,
   computed,
-  effect,
   inject,
   input,
   signal,
 } from '@angular/core';
+import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Meta, Title } from '@angular/platform-browser';
-import { ACTIVITIES } from 'src/app/domain/activities.data';
-import { NULL_ACTIVITY } from '../../domain/activity.type';
+import { Observable, catchError, map, of, switchMap } from 'rxjs';
+import { Booking } from 'src/app/domain/booking.type';
+import { Activity, NULL_ACTIVITY } from '../../domain/activity.type';
 import { ActivityTitlePipe } from './activity-title.pipe';
 
 @Component({
@@ -62,8 +66,12 @@ import { ActivityTitlePipe } from './activity-title.pipe';
                 [max]="maxNewParticipants()"
               />
             } @else {
-              <button class="secondary outline" (click)="onNewParticipantsChange(0)">Reset</button>
-              <span>Sorry, no more places available!</span>
+              <div>
+                <button class="secondary outline" (click)="onNewParticipantsChange(0)">
+                  Reset
+                </button>
+                <span>Sorry, no more places available!</span>
+              </div>
             }
             <button [disabled]="booked() || newParticipants() === 0" (click)="onBook()">
               Book {{ newParticipants() }} places now for {{ bookingAmount() | currency }}
@@ -97,12 +105,23 @@ import { ActivityTitlePipe } from './activity-title.pipe';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export default class BookingsPage {
+  #http$ = inject(HttpClient);
+  #activitiesUrl = 'http://localhost:3000/activities';
+  #bookingsUrl = 'http://localhost:3000/bookings';
   #title = inject(Title);
   #meta = inject(Meta);
-  slug = input<string>();
-  readonly activity = computed(
-    () => ACTIVITIES.find((activity) => activity.slug === this.slug()) || NULL_ACTIVITY,
+  slug: InputSignal<string> = input.required<string>();
+  slug$: Observable<string> = toObservable(this.slug);
+  activity$: Observable<Activity> = this.slug$.pipe(
+    switchMap((slug: string) => {
+      const activityUrl = `${this.#activitiesUrl}?slug=${slug}`;
+      return this.#http$.get<Activity[]>(activityUrl).pipe(
+        map((activities: Activity[]) => activities[0] || NULL_ACTIVITY),
+        catchError(() => of(NULL_ACTIVITY)),
+      );
+    }),
   );
+  readonly activity: Signal<Activity> = toSignal(this.activity$, { initialValue: NULL_ACTIVITY });
   readonly participants = signal<{ id: number }[]>([]);
   readonly currentParticipants = computed(() =>
     Math.floor(Math.random() * this.activity().maxParticipants),
@@ -124,44 +143,7 @@ export default class BookingsPage {
     return '';
   });
 
-  constructor() {
-    effect(() => {
-      const activity = this.activity();
-      this.#title.setTitle(activity.name);
-      const description = `${activity.name} in ${activity.location} on ${activity.date} for ${activity.price}`;
-      this.#meta.updateTag({ name: 'description', content: description });
-    });
-    effect(
-      () => {
-        this.participants.update((participants) => {
-          participants.splice(0, participants.length);
-          for (let i = 0; i < this.totalParticipants(); i++) {
-            participants.push({ id: participants.length + 1 });
-          }
-          return participants;
-        });
-      },
-      {
-        allowSignalWrites: true,
-      },
-    );
-    effect(() => {
-      if (!this.isBookable()) {
-        return;
-      }
-      const totalParticipants = this.totalParticipants();
-      const activity = this.activity();
-      let newStatus = activity.status;
-      if (totalParticipants >= activity.maxParticipants) {
-        newStatus = 'sold-out';
-      } else if (totalParticipants >= activity.minParticipants) {
-        newStatus = 'confirmed';
-      } else {
-        newStatus = 'published';
-      }
-      activity.status = newStatus;
-    });
-  }
+  constructor() {}
 
   onNewParticipantsChange(newParticipants: number) {
     if (newParticipants > this.maxNewParticipants()) {
@@ -172,5 +154,36 @@ export default class BookingsPage {
 
   onBook() {
     this.booked.set(true);
+
+    const newBooking: Booking = {
+      id: 0,
+      userId: 0,
+      activityId: this.activity().id,
+      date: new Date(),
+      participants: this.newParticipants(),
+      payment: {
+        method: 'creditCard',
+        amount: this.bookingAmount(),
+        status: 'pending',
+      },
+    };
+
+    this.#http$.post(this.#bookingsUrl, newBooking).subscribe({
+      next: (res) => {
+        console.log(res);
+        this.#updateActivityStatus();
+      },
+      error: (error) => {
+        console.error('Error creating booking', error);
+      },
+    });
+  }
+
+  #updateActivityStatus() {
+    const activityUrl = `${this.#activitiesUrl}/${this.activity().id}`;
+    this.#http$.put<Activity>(activityUrl, this.activity()).subscribe({
+      next: () => console.log('Activity status updated'),
+      error: (error) => console.error('Error updating activity', error),
+    });
   }
 }
